@@ -1,0 +1,44 @@
+**`nyxlang/core/interpreter.py`** - The full implementation I provided earlier, organized as a module.
+
+**`nyxlang/core/crash_recovery.py`**:
+```python
+import signal
+import mmap
+import os
+import json
+from datetime import datetime
+
+class NexusCheckpoint:
+    def __init__(self, checkpoint_dir=".nexus_checkpoints"):
+        self.checkpoint_dir = checkpoint_dir
+        os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    def save(self, state, label="auto"):
+        ts = datetime.now().isoformat()
+        filename = f"{self.checkpoint_dir}/checkpoint_{label}_{ts}.json"
+        with open(filename, 'w') as f:
+            json.dump(state, f)
+        return filename
+    
+    def restore(self, checkpoint_file):
+        with open(checkpoint_file, 'r') as f:
+            return json.load(f)
+
+def install_crash_handlers(checkpointer):
+    def sigsegv_handler(signum, frame):
+        print(f"[NEXUS CRASH] SIGSEGV at {frame.f_code.co_filename}:{frame.f_lineno}")
+        checkpoint = checkpointer.save({"crash_type": "SIGSEGV", "frame": str(frame)}, "crash")
+        print(f"[NEXUS RECOVERY] Checkpoint saved to {checkpoint}")
+        print("[NEXUS RECOVERY] Attempting restart from last good state...")
+        # Trigger healer
+        os.system("python -m nexus_healer.self_patch --from-crash")
+    
+    def sigill_handler(signum, frame):
+        print(f"[NEXUS CRASH] SIGILL - Invalid instruction")
+        checkpointer.save({"crash_type": "SIGILL"}, "crash")
+        # Attempt to revert last evolve()
+        os.system("python -m nexus_healer.rollback")
+    
+    signal.signal(signal.SIGSEGV, sigsegv_handler)
+    signal.signal(signal.SIGILL, sigill_handler)
+    signal.signal(signal.SIGBUS, sigsegv_handler)
